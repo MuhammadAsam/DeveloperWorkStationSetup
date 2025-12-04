@@ -1,13 +1,27 @@
 # =====================================================================
-# Microsoft Developer Work station setup - Setup & Uninstall
-# Azure DotNet and Azure Management Tools
-# Data Engineer Tools
+# Microsoft Developer Workstation Setup
+# Azure, .NET, Data, Terraform, Security, VS Code & Extensions
 # =====================================================================
-#  Purpose:
-#     Complete enterprise-ready environment for Data, Azure, Terraform,
-#     and Infrastructure-as-Code development.
-#     C#, Python
-#     Visual Studio Code with recommended extensions
+# Purpose:
+#   Complete enterprise-ready environment for:
+#   - Azure & Terraform (IaC)
+#   - Data Engineering tools (Python, SQLFluff, SSMS, ADS)
+#   - C# / .NET development
+#   - VS Code with recommended extensions
+#
+# Parameters:
+#   -IncludeAzureTools    : Install Azure-focused VS Code extensions
+#   -IncludeSQLTools      : Install SQL-focused VS Code extensions
+#   -IncludeDocker        : Install Docker Desktop + VS Code Docker ext
+#   -IncludePowerBI       : Install Power BI Desktop
+#   -IncludeSecurityTools : Install tfsec & Terrascan (Terraform security)
+#
+# Typical usage:
+#   # Full workstation (Azure + SQL + Terraform + Security)
+#   .\Setup-DevEnvironment.ps1 -IncludeAzureTools -IncludeSQLTools -IncludeDocker -IncludePowerBI -IncludeSecurityTools
+#
+#   # Core developer setup (no Docker/PowerBI/Security extras)
+#   .\Setup-DevEnvironment.ps1 -IncludeAzureTools -IncludeSQLTools
 # =====================================================================
 
 param(
@@ -15,8 +29,7 @@ param(
     [switch]$IncludeSQLTools,
     [switch]$IncludeDocker,
     [switch]$IncludePowerBI,
-    [switch]$IncludeSecurityTools,  # Security scanners (tfsec, terrascan)
-    [switch]$Uninstall
+    [switch]$IncludeSecurityTools  # Security scanners (tfsec, terrascan)
 )
 
 # ---------------------------------------------------------------------
@@ -42,18 +55,12 @@ function Install-App($id,$name){
     winget install --id $id --accept-package-agreements --accept-source-agreements -h
 }
 
-function Uninstall-App($id,$name){
-    try{
-        Write-Host "Uninstalling $name ($id)..."
-        winget uninstall --id $id -h
-    }catch{
-        Write-Warning "Skip $name: not installed or uninstall failed."
-    }
-}
-
 function Retry-Command([ScriptBlock]$cmd,[int]$n=3,[int]$delay=5){
     for($i=1;$i -le $n;$i++){
-        try { & $cmd; return } catch {
+        try {
+            & $cmd
+            return
+        } catch {
             Write-Warning "Attempt $i failed. Retrying in $delay s..."
             Start-Sleep -Seconds $delay
         }
@@ -67,8 +74,9 @@ function Ensure-Path {
         "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin",
         "$env:ProgramFiles\Git\cmd",
         "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin",
-        # Likely Terraform-related install locations (best-effort)
+        # Terraform-related (best-effort guesses)
         "$env:ProgramFiles\HashiCorp\Terraform",
+        "$env:ProgramFiles\Terraform Language Server",
         "$env:ProgramFiles\terraform-ls",
         "$env:ProgramFiles\tflint",
         "$env:ProgramFiles\tfsec",
@@ -93,42 +101,30 @@ function Ensure-Path {
 }
 
 # ---------------------------------------------------------------------
-# --- UNINSTALL
-# ---------------------------------------------------------------------
-if ($Uninstall){
-    Start-Transcript -Path "$env:USERPROFILE\Documents\DataEngUninstall.log" -Append
-    $toRemove = @(
-        "Python.Python.3.12","Git.Git","Microsoft.VisualStudioCode",
-        "Microsoft.AzureCLI","Microsoft.AzureDataStudio",
-        "Docker.DockerDesktop","Microsoft.PowerBI",
-        "HashiCorp.Terraform","Terraform.Ls","tflint",
-        "AquaSecurity.tfsec","Accurics.Terrascan"
-    )
-    foreach($pkg in $toRemove){ Uninstall-App $pkg $pkg }
-    Stop-Transcript
-    Write-Host "Uninstall complete."
-    exit 0
-}
-
-# ---------------------------------------------------------------------
 # --- INSTALL
 # ---------------------------------------------------------------------
 Start-Transcript -Path "$env:USERPROFILE\Documents\DataEngSetup.log" -Append
 $start = Get-Date
 
-# --- Core software ---
-Install-App "Python.Python.3.12" "Python"
-Install-App "Git.Git" "Git"
-Install-App "Microsoft.VisualStudioCode" "VS Code"
-Install-App "Microsoft.AzureCLI" "Azure CLI"
-Install-App "Microsoft.AzureDataStudio" "Azure Data Studio"
-if ($IncludeDocker){ Install-App "Docker.DockerDesktop" "Docker" }
-if ($IncludePowerBI){ Install-App "Microsoft.PowerBI" "Power BI" }
+Write-Host "Updating winget sources..."
+Retry-Command { winget source update }
 
-# --- Terraform toolchain ---
-Install-App "HashiCorp.Terraform" "Terraform CLI"
-Install-App "Terraform.Ls" "Terraform Language Server"
-Install-App "tflint" "Terraform Linter"
+# --- Core software ---
+Install-App "Python.Python.3.12"                 "Python"
+Install-App "Git.Git"                            "Git"
+Install-App "Microsoft.VisualStudioCode"         "VS Code"
+Install-App "Microsoft.AzureCLI"                 "Azure CLI"
+Install-App "Microsoft.AzureDataStudio"          "Azure Data Studio"
+Install-App "Microsoft.SQLServerManagementStudio" "SSMS"
+
+if ($IncludeDocker)  { Install-App "Docker.DockerDesktop" "Docker Desktop" }
+if ($IncludePowerBI) { Install-App "Microsoft.PowerBI"    "Power BI Desktop" }
+
+# --- Terraform toolchain (correct winget IDs) ---
+Install-App "Hashicorp.Terraform"               "Terraform CLI"
+Install-App "Hashicorp.TerraformLanguageServer" "Terraform Language Server"
+Install-App "TerraformLinters.tflint"           "Terraform Linter (tflint)"
+
 if ($IncludeSecurityTools){
     Install-App "AquaSecurity.tfsec" "Terraform Security Scanner (tfsec)"
     Install-App "Accurics.Terrascan" "Terraform Compliance Scanner (terrascan)"
@@ -139,21 +135,48 @@ if ($IncludeSecurityTools){
 # ---------------------------------------------------------------------
 Retry-Command { python -m ensurepip }
 Retry-Command { python -m pip install --upgrade pip wheel setuptools }
-Retry-Command { python -m pip install pandas pyodbc sqlalchemy azure-identity azure-storage-blob sqlfluff }
-
-try {
-    Retry-Command { sqlfluff config --write-defaults }
-    $configFile = "$env:USERPROFILE\.config\sqlfluff\config.toml"
-    if (Test-Path $configFile) {
-        (Get-Content $configFile) -replace 'dialect = "ansi"', 'dialect = "tsql"' | Set-Content $configFile
-        Write-Host "Configured SQLFluff default dialect = tsql"
-    }
-} catch {
-    Write-Warning "SQLFluff config initialisation skipped."
+Retry-Command {
+    python -m pip install `
+        pandas `
+        pyodbc `
+        sqlalchemy `
+        azure-identity `
+        azure-storage-blob `
+        sqlfluff
 }
 
-# Suppress Azure CLI update prompts
+# --- SQLFluff configuration (no CLI 'config' command) ---
+try {
+    # Preferred simple approach: .sqlfluff in home directory
+    $sqlfluffConfigPath = Join-Path $env:USERPROFILE ".sqlfluff"
+
+    if (-not (Test-Path $sqlfluffConfigPath)) {
+        "[sqlfluff]`n# Default dialect for this machine`ndialect = tsql" |
+            Set-Content -Path $sqlfluffConfigPath -Encoding UTF8
+        Write-Host "Created SQLFluff config at $sqlfluffConfigPath (dialect = tsql)."
+    } else {
+        $content = Get-Content $sqlfluffConfigPath -Raw
+        if ($content -notmatch '^\s*dialect\s*=' ) {
+            $content += "`n`n[sqlfluff]`n# Default dialect for this machine`ndialect = tsql`n"
+            $content | Set-Content -Path $sqlfluffConfigPath -Encoding UTF8
+            Write-Host "Updated existing SQLFluff config with dialect = tsql."
+        } else {
+            Write-Host "SQLFluff config already exists; leaving dialect as-is."
+        }
+    }
+} catch {
+    Write-Warning "SQLFluff config initialisation skipped: $($_.Exception.Message)"
+}
+
+# Suppress Azure CLI update prompts as far as possible
 $env:AZURE_CORE_SUPPRESS_UPDATE_WARNING = "1"
+try {
+    if (Get-Command az -ErrorAction SilentlyContinue) {
+        Retry-Command { az config set core.check_for_updates false }
+    }
+} catch {
+    Write-Warning "Unable to update Azure CLI config to disable update checks."
+}
 
 # ---------------------------------------------------------------------
 # --- VS Code extensions
@@ -164,41 +187,64 @@ if (-not $codeCmdObj){
     Start-Sleep -Seconds 10
     $codeCmdObj = Get-Command code.cmd -ErrorAction SilentlyContinue
 }
+
 if ($codeCmdObj){
     $codeCmd = $codeCmdObj.Source
+    Write-Host "Installing VS Code extensions..."
+
     $coreExt  = @(
         "ms-dotnettools.csharp",
         "ms-dotnettools.csdevkit",
         "humao.rest-client",
         "dorzey.vscode-sqlfluff"
     )
-    $sqlExt   = @("ms-mssql.mssql","mtxr.sqltools","sqltools-driver.sqlserver","MEngRBatinov.mssql-scripts")
-    $azureExt = @("ms-vscode.azure-account","ms-azuretools.vscode-azureresources",
-                  "ms-azuretools.vscode-azurefunctions","ms-azuretools.vscode-logicapps","ms-azuretools.vscode-bicep")
-    $dockerExt= @("ms-azuretools.vscode-docker")
 
-    $terraformExt = @(
-        "HashiCorp.terraform",                 # HashiCorp Terraform
-        "ms-azuretools.vscode-azureterraform", # Microsoft Terraform (Azure)
-        "mauve.terraform-docs",                # Terraform Docs generator
-        "erd0s.terraform-snippets",            # Helpful snippets
-        "yusukehirao.vscode-tflint"            # Terraform Linter integration
+    $sqlExt   = @(
+        "ms-mssql.mssql",
+        "mtxr.sqltools",
+        "sqltools-driver.sqlserver",
+        "MEngRBatinov.mssql-scripts"
     )
 
-    $exts=$coreExt
-    if ($IncludeSQLTools){$exts+=$sqlExt}
-    if ($IncludeAzureTools){$exts+=$azureExt}
-    if ($IncludeDocker){$exts+=$dockerExt}
-    $exts+=$terraformExt
+    $azureExt = @(
+        "ms-vscode.azure-account",
+        "ms-azuretools.vscode-azureresources",
+        "ms-azuretools.vscode-azurefunctions",
+        "ms-azuretools.vscode-logicapps",
+        "ms-azuretools.vscode-bicep"
+    )
 
-    $installed=&$codeCmd --list-extensions
+    $dockerExt = @(
+        "ms-azuretools.vscode-docker"
+    )
+
+    # Terraform ecosystem (all valid IDs)
+    $terraformExt = @(
+        "HashiCorp.terraform",                 # HashiCorp Terraform extension
+        "ms-azuretools.vscode-azureterraform", # Azure-focused Terraform integration
+        "run-at-scale.terraform-doc-snippets", # Auto-generated doc snippets
+        "mindginative.terraform-snippets",     # General Terraform snippets
+        "NandovdK.tflint-vscode"               # TFLint VS Code integration
+    )
+
+    $exts = $coreExt
+    if ($IncludeSQLTools)  { $exts += $sqlExt }
+    if ($IncludeAzureTools){ $exts += $azureExt }
+    if ($IncludeDocker)    { $exts += $dockerExt }
+    $exts += $terraformExt
+
+    $installed = & $codeCmd --list-extensions
     foreach($e in $exts){
         if ($installed -notcontains $e){
-            Retry-Command { & $codeCmd --install-extension $e --force }
+            try {
+                Retry-Command { & $codeCmd --install-extension $e --force }
+            } catch {
+                Write-Warning "Failed installing VS Code extension: $e"
+            }
         }
     }
-}else{
-    Write-Warning "VS Code CLI not found; extensions skipped. Open VS Code once and rerun for extensions."
+} else {
+    Write-Warning "VS Code CLI not found; extensions skipped. Open VS Code once and rerun this script for extensions."
 }
 
 # ---------------------------------------------------------------------
@@ -209,24 +255,25 @@ Retry-Command { winget upgrade Microsoft.DotNet.SDK.8 --accept-source-agreements
 Retry-Command { winget upgrade --all --accept-source-agreements --accept-package-agreements }
 
 # ---------------------------------------------------------------------
-# --- Validation (smarter, command-aware)
+# --- Validation (command-aware, with 2>&1 for noisy CLIs)
 # ---------------------------------------------------------------------
 Ensure-Path
 
 $tests=@(
-    @{Name="Python"      ;Cmd="python --version"},
-    @{Name="Git"         ;Cmd="git --version"},
-    @{Name="AzureCLI"    ;Cmd="az --version"},
-    @{Name="Terraform"   ;Cmd="terraform version"},
-    @{Name="Terraform-LS";Cmd="terraform-ls --version"},
-    @{Name="TFLint"      ;Cmd="tflint --version"},
-    @{Name="VS Code"     ;Cmd="code --version"},
-    @{Name="SQLFluff"    ;Cmd="sqlfluff --version"}
+    @{Name="Python"      ;Cmd="python --version 2>&1"},
+    @{Name="Git"         ;Cmd="git --version 2>&1"},
+    @{Name="AzureCLI"    ;Cmd="az --version 2>&1"},
+    @{Name="Terraform"   ;Cmd="terraform version 2>&1"},
+    @{Name="Terraform-LS";Cmd="terraform-ls --version 2>&1"},
+    @{Name="TFLint"      ;Cmd="tflint --version 2>&1"},
+    @{Name="VS Code"     ;Cmd="code --version 2>&1"},
+    @{Name="SQLFluff"    ;Cmd="sqlfluff --version 2>&1"},
+    @{Name="SSMS"        ;Cmd="winget list --id Microsoft.SQLServerManagementStudio 2>&1"}
 )
 if ($IncludeSecurityTools){
     $tests += @(
-        @{Name="tfsec"    ;Cmd="tfsec --version"},
-        @{Name="Terrascan";Cmd="terrascan version"}
+        @{Name="tfsec"    ;Cmd="tfsec --version 2>&1"},
+        @{Name="Terrascan";Cmd="terrascan version 2>&1"}
     )
 }
 
@@ -234,9 +281,12 @@ foreach($t in $tests){
     $cmdName = ($t.Cmd -split ' ')[0]  # first token, e.g. 'terraform'
     $cmdObj  = Get-Command $cmdName -ErrorAction SilentlyContinue
     if ($cmdObj){
+        Write-Host "`n$($t.Name):"
         try{
-            Write-Host "`n$($t.Name):"
-            Invoke-Expression $t.Cmd
+            $result = Invoke-Expression $t.Cmd
+            if ($result) {
+                $result | Out-String | Write-Host
+            }
         }catch{
             Write-Warning "$($t.Name) command exists but failed to run: $($_.Exception.Message)"
         }
@@ -249,7 +299,7 @@ $elapsed=(Get-Date)-$start
 Stop-Transcript
 
 Write-Host "`n=============================================================="
-Write-Host "Azure + Terraform + Security + Data Engineering Environment ready!"
+Write-Host "Azure + Terraform + Security + Developer + Data Engineering Environment ready!"
 Write-Host "Duration: $($elapsed.ToString('hh\:mm\:ss'))"
 Write-Host "Restart PowerShell and VS Code to finalise PATH updates."
 Write-Host "Log file: $env:USERPROFILE\Documents\DataEngSetup.log"
