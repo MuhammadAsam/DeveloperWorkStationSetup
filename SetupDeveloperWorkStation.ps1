@@ -1,6 +1,6 @@
 # =====================================================================
 # Setup-DevEnvironment.ps1
-# Version: 2025.02.15.02
+# Version: 2025.12.21.01
 # Author: Viridians
 #
 # Purpose:
@@ -26,21 +26,27 @@
 # NOTE:
 #   This script is fully standalone and requires WinGet.
 # =====================================================================
+# WinGet prerequisite check
+# ---------------------------------------------------------------------
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Error "WinGet is not available. Install 'App Installer' from Microsoft Store and re-run this script."
+    exit 1
+}
 
 param(
     [switch]$IncludeAzureTools,
     [switch]$IncludeSQLTools,
     [switch]$IncludeDocker,
     [switch]$IncludePowerBI,
-    [switch]$IncludeSecurityTools
+    [switch]$IncludeSecurityTools,
+    [switch]$Uninstall
 )
 
 # ---------------------------------------------------------------------
-# Elevate to Administrator
+# Elevation + Execution Policy (process-only)
 # ---------------------------------------------------------------------
 $curr = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $curr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Restarting PowerShell as Administrator..."
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName  = "powershell"
     $psi.Arguments = "-ExecutionPolicy Bypass -File `"$PSCommandPath`" $($args -join ' ')"
@@ -51,22 +57,26 @@ if (-not $curr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 # ---------------------------------------------------------------------
-# Helper Functions
+# Helper functions
 # ---------------------------------------------------------------------
 function Install-App($id,$name){
-    Write-Host "Installing $name ($id)..."
-    winget install --id $id --accept-package-agreements --accept-source-agreements -h
+    Write-Host "Installing $name..."
+    winget install --id $id `
+        --accept-package-agreements `
+        --accept-source-agreements `
+        --silent `
+        --disable-interactivity `
+        -h
 }
 
-function Retry-Command([ScriptBlock]$cmd,[int]$n=3,[int]$delay=5){
-    for ($i=1; $i -le $n; $i++){
-        try { & $cmd; return }
-        catch {
-            Write-Warning "Attempt $i failed. Retrying in $delay seconds..."
-            Start-Sleep -Seconds $delay
-        }
+function Uninstall-App($id,$name){
+    try { winget uninstall --id $id -h } catch {}
+}
+
+function Retry-Command([ScriptBlock]$cmd,[int]$n=3){
+    for($i=1;$i -le $n;$i++){
+        try { & $cmd; return } catch { Start-Sleep 5 }
     }
-    Write-Warning "Command failed after $n attempts."
 }
 
 function Ensure-Path {
@@ -74,218 +84,131 @@ function Ensure-Path {
         "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin",
         "$env:ProgramFiles\Git\cmd",
         "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin",
-        "$env:ProgramFiles\HashiCorp\Terraform",
-        "$env:ProgramFiles\Terraform Language Server",
-        "$env:ProgramFiles\tflint",
-        "$env:ProgramFiles\tfsec",
-        "$env:ProgramFiles\terrascan"
+        "$env:ProgramFiles\terraform-ls",
+        "$env:ProgramFiles\HashiCorp\Terraform"
     )
-
-    foreach ($p in $paths){
-        if (Test-Path $p -and ($env:PATH -notmatch [regex]::Escape($p))){
+    foreach($p in $paths){
+        if (Test-Path $p -and $env:PATH -notmatch [regex]::Escape($p)){
             $env:PATH += ";$p"
-            Write-Host "Added to PATH: $p"
         }
     }
+}
 
-    $pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
-    if ($pythonExe){
-        $scripts = Join-Path (Split-Path $pythonExe) "Scripts"
-        if (Test-Path $scripts -and ($env:PATH -notmatch [regex]::Escape($scripts))){
-            $env:PATH += ";$scripts"
-            Write-Host "Added Python Scripts path: $scripts"
-        }
-    }
+function Install-SSMS {
+    Write-Host "Installing latest SSMS..."
+    $exe = "$env:TEMP\SSMS.exe"
+    Invoke-WebRequest "https://aka.ms/ssmsfullsetup" -OutFile $exe
+    Start-Process $exe -ArgumentList "/install /quiet /norestart" -Wait
+}
+
+# ---------------------------------------------------------------------
+# UNINSTALL
+# ---------------------------------------------------------------------
+if ($Uninstall){
+    Start-Transcript "$env:USERPROFILE\Documents\DataEngUninstall.log"
+    @(
+        "Python.Python.3.12","Git.Git","Microsoft.VisualStudioCode",
+        "Microsoft.AzureCLI","Microsoft.AzureDataStudio",
+        "Docker.DockerDesktop","Microsoft.PowerBI",
+        "HashiCorp.Terraform","Terraform.Ls","tflint",
+        "AquaSecurity.tfsec","Accurics.Terrascan"
+    ) | ForEach-Object { Uninstall-App $_ $_ }
+    Stop-Transcript
+    exit
 }
 
 # ---------------------------------------------------------------------
 # INSTALL
 # ---------------------------------------------------------------------
-Start-Transcript -Path "$env:USERPROFILE\Documents\DataEngSetup.log" -Append
+Start-Transcript "$env:USERPROFILE\Documents\DataEngSetup.log"
 $start = Get-Date
 
 Retry-Command { winget source update }
 
-Install-App "Python.Python.3.12"                   "Python"
-Install-App "Git.Git"                              "Git"
-Install-App "Microsoft.VisualStudioCode"            "VS Code"
-Install-App "Microsoft.AzureCLI"                   "Azure CLI"
-Install-App "Microsoft.AzureDataStudio"            "Azure Data Studio"
-Install-App "Microsoft.SQLServerManagementStudio"  "SSMS"
-Install-App "Microsoft.CascadiaCode"               "Cascadia Code Font"
+Install-App "Python.Python.3.12"        "Python"
+Install-App "Git.Git"                   "Git"
+Install-App "Microsoft.VisualStudioCode" "VS Code"
+Install-App "Microsoft.AzureCLI"        "Azure CLI"
+Install-App "Microsoft.AzureDataStudio" "Azure Data Studio"
+Install-App "Microsoft.CascadiaCode"    "Cascadia Code Font"
+Install-SSMS
 
-if ($IncludeDocker)  { Install-App "Docker.DockerDesktop"  "Docker Desktop" }
-if ($IncludePowerBI) { Install-App "Microsoft.PowerBI"     "Power BI Desktop" }
+if ($IncludeDocker){ Install-App "Docker.DockerDesktop" "Docker" }
+if ($IncludePowerBI){ Install-App "Microsoft.PowerBI" "Power BI" }
 
-# Terraform components
-Install-App "HashiCorp.Terraform"                  "Terraform CLI"
-Install-App "HashiCorp.TerraformLanguageServer"    "Terraform LS"
-Install-App "TerraformLinters.tflint"              "TFLint"
+Install-App "HashiCorp.Terraform" "Terraform"
+Install-App "Terraform.Ls"        "Terraform Language Server"
+Install-App "tflint"              "TFLint"
 
 if ($IncludeSecurityTools){
     Install-App "AquaSecurity.tfsec" "tfsec"
     Install-App "Accurics.Terrascan" "Terrascan"
 }
 
+# Azure CLI upgrade (silent)
+try { az upgrade --yes --only-show-errors } catch {}
+
 # ---------------------------------------------------------------------
-# Python & SQLFluff Setup
+# Python tooling
 # ---------------------------------------------------------------------
 Retry-Command { python -m ensurepip }
-Retry-Command { python -m pip install --upgrade pip wheel setuptools }
-Retry-Command {
-    python -m pip install `
-        pandas `
-        pyodbc `
-        sqlalchemy `
-        azure-identity `
-        azure-storage-blob `
-        sqlfluff
-}
-
-# SQLFluff v3 config
-try {
-    $sqlfluffCfg = "$env:USERPROFILE\.sqlfluff"
-    if (-not (Test-Path $sqlfluffCfg)) {
-        "[sqlfluff]`ndialect = tsql" | Set-Content $sqlfluffCfg
-        Write-Host "Created SQLFluff config with dialect=tsql"
-    }
-} catch {
-    Write-Warning "SQLFluff config skipped: $($_.Exception.Message)"
-}
-
-# Suppress Azure CLI update warnings
-$env:AZURE_CORE_SUPPRESS_UPDATE_WARNING = "1"
-try { az config set core.check_for_updates false } catch {}
+Retry-Command { python -m pip install --upgrade pip setuptools wheel }
+Retry-Command { python -m pip install pandas pyodbc sqlalchemy azure-identity azure-storage-blob sqlfluff }
 
 # ---------------------------------------------------------------------
-# VS Code Extensions
+# VS Code extensions
 # ---------------------------------------------------------------------
-$codeCmdObj = Get-Command code.cmd -ErrorAction SilentlyContinue
-if (-not $codeCmdObj){
-    Start-Sleep 10
-    $codeCmdObj = Get-Command code.cmd -ErrorAction SilentlyContinue
-}
-
-if ($codeCmdObj){
-    $codeCmd = $codeCmdObj.Source
-
-    Write-Host "Installing VS Code extensions..."
-
-    # Core Extensions (Option A)
-    $coreExt = @(
+$code = Get-Command code.cmd -ErrorAction SilentlyContinue
+if ($code){
+    $exts = @(
         "ms-dotnettools.csharp",
         "ms-dotnettools.csdevkit",
-        "humao.rest-client",
-        "dorzey.vscode-sqlfluff",
-        "ms-vscode.vs-keybindings",
-        "ms-edgedevtools.vscode-edge-devtools",
         "esbenp.prettier-vscode",
-        "ms-azuretools.vscode-docker",
-        "docker.docker"
-    )
-
-    # SQL Extensions
-    $sqlExt = @(
-        "ms-mssql.mssql",
-        "mtxr.sqltools",
-        "sqltools-driver.sqlserver",
-        "MEngRBatinov.mssql-scripts"
-    )
-
-    # Azure Extensions (deprecated ones removed)
-    $azureExt = @(
-        "ms-azuretools.vscode-azureresourcegroups",
+        "dorzey.vscode-sqlfluff",
         "ms-azuretools.vscode-azureresources",
-        "ms-azuretools.vscode-azurefunctions",
-        "ms-azuretools.vscode-logicapps",
         "ms-azuretools.vscode-bicep",
-        "ms-azuretools.vscode-azureappservice"
-    )
-
-    # Docker extensions (docker.docker already included in core)
-    $dockerExt = @("ms-azuretools.vscode-docker")
-
-    # Terraform Extensions (corrected IDs)
-    $terraformExt = @(
+        "ms-azuretools.vscode-docker",
+        "docker.docker",
         "HashiCorp.terraform",
         "ms-azuretools.vscode-azureterraform",
-        "run-at-scale.terraform-doc-snippets",
-        "mindginative.terraform-snippets",
-        "NandovdK.tflint-vscode"
+        "github.vscode-pull-request-GitHub",
+        "github.vscode-github-actions",
+        "github.remotehub",
+        "azure-devops",
+        "seyyedkhandon.firacode"
     )
-
-    $exts = $coreExt
-    if ($IncludeSQLTools)  { $exts += $sqlExt }
-    if ($IncludeAzureTools){ $exts += $azureExt }
-    if ($IncludeDocker)    { $exts += $dockerExt }
-    $exts += $terraformExt
-
-    $installed = & $codeCmd --list-extensions
-
-    foreach ($e in $exts){
+    $installed = & $code --list-extensions
+    foreach($e in $exts){
         if ($installed -notcontains $e){
-            try { Retry-Command { & $codeCmd --install-extension $e --force } }
-            catch { Write-Warning "Failed to install extension: $e" }
+            Retry-Command { & $code --install-extension $e --force }
         }
     }
-} else {
-    Write-Warning "VS Code CLI unavailable. Extensions skipped."
 }
 
 # ---------------------------------------------------------------------
-# Cascadia Code VS Code Integration + Prettier Defaults
-# ---------------------------------------------------------------------
-$vsSettings = "$env:APPDATA\Code\User\settings.json"
-if (-not (Test-Path $vsSettings)) {
-    @{} | ConvertTo-Json | Out-File $vsSettings
-}
-
-$json = Get-Content $vsSettings -Raw | ConvertFrom-Json
-
-# Font settings
-$json."editor.fontFamily"    = "Cascadia Code, Consolas, 'Courier New', monospace"
-$json."editor.fontLigatures" = $true
-
-# Prettier as default formatter
-$json."editor.defaultFormatter" = "esbenp.prettier-vscode"
-$json."editor.formatOnSave"     = $true
-
-# Set language-specific defaults
-$json."[json]"."editor.defaultFormatter"       = "esbenp.prettier-vscode"
-$json."[yaml]"."editor.defaultFormatter"       = "esbenp.prettier-vscode"
-$json."[typescript]"."editor.defaultFormatter" = "esbenp.prettier-vscode"
-$json."[javascript]"."editor.defaultFormatter" = "esbenp.prettier-vscode"
-$json."[markdown]"."editor.defaultFormatter"   = "esbenp.prettier-vscode"
-
-$json | ConvertTo-Json -Depth 10 | Set-Content $vsSettings -Encoding UTF8
-
-Write-Host "Cascadia Code enabled + Prettier set as default."
-
-# ---------------------------------------------------------------------
-# VALIDATION
+# Validation
 # ---------------------------------------------------------------------
 Ensure-Path
 
-$tests=@(
-    @{Name="Python"      ;Cmd="python --version"},
-    @{Name="Git"         ;Cmd="git --version"},
-    @{Name="AzureCLI"    ;Cmd="az --version"},
-    @{Name="Terraform"   ;Cmd="terraform version"},
-    @{Name="Terraform-LS";Cmd="terraform-ls --version"},
-    @{Name="TFLint"      ;Cmd="tflint --version"},
-    @{Name="SQLFluff"    ;Cmd="sqlfluff --version"}
+$checks = @(
+    "python --version",
+    "git --version",
+    "az --version",
+    "terraform version",
+    "terraform-ls --version",
+    "tflint --version",
+    "code --version",
+    "sqlfluff --version"
 )
 
-foreach ($t in $tests){
-    Write-Host "`n$($t.Name):"
-    try { Invoke-Expression "$($t.Cmd) 2>&1" }
-    catch { Write-Warning "$($t.Name) failed: $($_.Exception.Message)" }
+foreach($c in $checks){
+    try { Invoke-Expression $c } catch {}
 }
 
-$elapsed = (Get-Date) - $start
 Stop-Transcript
 
-Write-Host "`n=============================================================="
-Write-Host "Developer Environment Ready! (Version 2025.02.15.02)"
-Write-Host "Duration: $($elapsed.ToString('hh\:mm\:ss'))"
+Write-Host "=============================================================="
+Write-Host "Developer Workstation READY"
+Write-Host "Duration: $((Get-Date)-$start)"
+Write-Host "Restart PowerShell and VS Code to finalise PATH updates."
 Write-Host "=============================================================="
