@@ -1,30 +1,8 @@
 # =====================================================================
-# Setup-DevEnvironment.ps1
-# Version: 2025.12.21.01
-# Author: Viridians
-#
-# Purpose:
-#   Complete developer workstation setup for Azure, Terraform, Data
-#   Engineering, Python, SQL, C#, Docker, and DevOps tooling.
-#
-# Includes:
-#   - Azure CLI, Azure Dev Tools
-#   - Terraform, Terraform LS, TFLint (+ optional security tools)
-#   - Python + SQLFluff (v3+ compatible)
-#   - SSMS, Azure Data Studio
-#   - VS Code + recommended extensions
-#   - Cascadia Code font (install + enable)
-#   - Prettier as the default formatter
-#
-# Parameters:
-#   -IncludeAzureTools
-#   -IncludeSQLTools
-#   -IncludeDocker
-#   -IncludePowerBI
-#   -IncludeSecurityTools
-#
-# NOTE:
-#   This script is fully standalone and requires WinGet.
+# Setup-DeveloperWorkstation.ps1
+# Version: 2026.01.07.01
+# Purpose: Install-only developer workstation setup
+# NOTE: This script is fully standalone and requires WinGet.
 # =====================================================================
 
 param(
@@ -69,8 +47,8 @@ function Install-App($id,$name){
 }
 
 function Refresh-Path {
-    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
-                 [System.Environment]::GetEnvironmentVariable("PATH","User")
+    $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("PATH","User")
 }
 
 function Retry([scriptblock]$cmd,[int]$n=3){
@@ -94,32 +72,34 @@ $start = Get-Date
 
 Retry { winget source update }
 
-Install-App "Python.Python.3.12"        "Python"
-Install-App "Git.Git"                   "Git"
-Install-App "Microsoft.DotNet.SDK.8"    ".NET SDK"
+Install-App "Python.Python.3.12"         "Python"
+Install-App "Git.Git"                    "Git"
+Install-App "Microsoft.DotNet.SDK.8"     ".NET SDK"
 Install-App "Microsoft.VisualStudioCode" "VS Code"
-Install-App "Microsoft.AzureCLI"        "Azure CLI"
-Install-App "Microsoft.AzureDataStudio" "Azure Data Studio"
-Install-App "Microsoft.CascadiaCode"    "Cascadia Code Font"
-Install-SSMS
+Install-App "Microsoft.AzureCLI"         "Azure CLI"
+Install-App "HashiCorp.Terraform"        "Terraform"
 
+# Optional tools
 if ($IncludeDocker){ Install-App "Docker.DockerDesktop" "Docker" }
 if ($IncludePowerBI){ Install-App "Microsoft.PowerBI" "Power BI" }
 
-Install-App "HashiCorp.Terraform" "Terraform"
-Install-App "Terraform.Ls"        "Terraform Language Server"
-Install-App "tflint"              "TFLint"
+# Terraform ecosystem
+Install-App "HashiCorp.TerraformLS" "Terraform Language Server"
+Install-App "tflint.tflint"         "TFLint"
 
 if ($IncludeSecurityTools){
-    Install-App "AquaSecurity.tfsec" "tfsec"
-    Install-App "Accurics.Terrascan" "Terrascan"
+    Install-App "AquaSecurity.tfsec"  "tfsec"
+    Install-App "Accurics.Terrascan"  "Terrascan"
 }
 
-# Azure CLI upgrade
+# SSMS (always latest)
+Install-SSMS
+
+# Azure CLI self-upgrade
 try { az upgrade --yes --only-show-errors } catch {}
 
 # ---------------------------------------------------------------------
-# PATH refresh before Python / VS Code usage
+# PATH refresh BEFORE using tools
 # ---------------------------------------------------------------------
 Refresh-Path
 
@@ -129,35 +109,61 @@ Refresh-Path
 Retry { python --version }
 Retry { python -m ensurepip }
 Retry { python -m pip install --upgrade pip setuptools wheel }
-Retry { python -m pip install pandas pyodbc sqlalchemy azure-identity azure-storage-blob sqlfluff }
+Retry {
+    python -m pip install `
+        pandas pyodbc sqlalchemy `
+        azure-identity azure-storage-blob `
+        sqlfluff
+}
 
 # ---------------------------------------------------------------------
-# VS Code extensions (install only if CLI available)
+# VS Code extensions
 # ---------------------------------------------------------------------
 $codeCmd = Get-Command code.cmd -ErrorAction SilentlyContinue
 if ($codeCmd){
+
     $extensions = @(
+        # Core
         "ms-dotnettools.csharp",
         "ms-dotnettools.csdevkit",
         "esbenp.prettier-vscode",
         "dorzey.vscode-sqlfluff",
-        "ms-azuretools.vscode-azureresources",
+
+        # Python / Jupyter
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "ms-python.vscode-python-envs",
+        "ms-toolsai.jupyter",
+        "ms-toolsai.vscode-jupyter-cell-tags",
+        "ms-toolsai.jupyter-keymap",
+        "ms-toolsai.vscode-jupyter-slideshow",
+
+        # Azure / IaC
         "ms-azuretools.vscode-bicep",
         "ms-azuretools.vscode-docker",
         "docker.docker",
         "HashiCorp.terraform",
         "ms-azuretools.vscode-azureterraform",
-        "github.vscode-pull-request-GitHub",
+
+        # DevOps / GitHub
+        "github.vscode-pull-request-github",
         "github.vscode-github-actions",
         "github.remotehub",
-        "azure-devops",
+        "ms-vscode.azure-devops",
+
+        # Fonts
         "seyyedkhandon.firacode"
     )
 
     $installed = & $codeCmd --list-extensions
     foreach($ext in $extensions){
         if ($installed -notcontains $ext){
-            Retry { & $codeCmd --install-extension $ext --force }
+            try {
+                & $codeCmd --install-extension $ext --force
+            } catch {
+                Write-Warning "Extension failed: $ext"
+            }
         }
     }
 }
