@@ -1,6 +1,6 @@
 # =====================================================================
 # Setup-DeveloperWorkstation.ps1
-# Version: 2026.01.07.01
+# Version: 2026.01.11.02
 # Purpose: Install-only developer workstation setup
 # NOTE: This script is fully standalone and requires WinGet.
 # =====================================================================
