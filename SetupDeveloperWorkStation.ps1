@@ -1,8 +1,8 @@
 # =====================================================================
 # Setup-DeveloperWorkstation.ps1
-# Version: 2026.01.11.03
-# Purpose: Install-only developer workstation setup
-# NOTE: This script is fully standalone and requires WinGet.
+# Version: 2026.01.11.05
+# Purpose: Install-only developer workstation setup (UNATTENDED)
+# NOTE: Requires WinGet
 # =====================================================================
 
 param(
@@ -22,7 +22,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 }
 
 # ---------------------------------------------------------------------
-# Elevation
+# Elevation (required for SSMS, Docker)
 # ---------------------------------------------------------------------
 $curr = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $curr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -36,9 +36,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
-function Install-App($id,$name){
+function Install-App($id,$name,[string]$scope="machine"){
     Write-Host "Installing $name..."
     winget install --id $id `
+        --scope $scope `
         --accept-package-agreements `
         --accept-source-agreements `
         --silent `
@@ -47,8 +48,9 @@ function Install-App($id,$name){
 }
 
 function Refresh-Path {
-    $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
-                [Environment]::GetEnvironmentVariable("PATH","User")
+    $env:PATH =
+        [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+        [Environment]::GetEnvironmentVariable("PATH","User")
 }
 
 function Retry([scriptblock]$cmd,[int]$n=3){
@@ -58,10 +60,10 @@ function Retry([scriptblock]$cmd,[int]$n=3){
 }
 
 function Install-SSMS {
-    Write-Host "Installing latest SSMS..."
-    $exe = "$env:TEMP\SSMS.exe"
-    Invoke-WebRequest "https://aka.ms/ssmsfullsetup" -OutFile $exe
-    Start-Process $exe "/install /quiet /norestart" -Wait
+    Write-Host "Installing latest SSMS (silent)..."
+    $exe = "$env:TEMP\SSMS-Setup.exe"
+    Invoke-WebRequest "https://aka.ms/ssmsfullsetup" -OutFile $exe -UseBasicParsing
+    Start-Process $exe -ArgumentList "/install /quiet /norestart" -Wait
 }
 
 # ---------------------------------------------------------------------
@@ -72,43 +74,44 @@ $start = Get-Date
 
 Retry { winget source update }
 
-Install-App "Python.Python.3.12"                 "Python"
-Install-App "Git.Git"                            "Git"
-Install-App "Microsoft.DotNet.SDK.8"             ".NET SDK"
-Install-App "Microsoft.VisualStudioCode.User"    "VS Code (User Installer)"
-Install-App "Microsoft.AzureCLI"                 "Azure CLI"
-Install-App "HashiCorp.Terraform"                "Terraform"
+# Core tooling
+Install-App "Python.Python.3.12"              "Python"
+Install-App "Git.Git"                         "Git"
+Install-App "Microsoft.DotNet.SDK.8"          ".NET SDK"
+
+# VS Code — USER SCOPE (no UAC / no extension issues)
+Install-App "Microsoft.VisualStudioCode"      "VS Code (User)" "user"
+
+Install-App "Microsoft.AzureCLI"              "Azure CLI"
+Install-App "HashiCorp.Terraform"             "Terraform"
 
 # Optional tools
-if ($IncludeDocker){ Install-App "Docker.DockerDesktop" "Docker" }
-if ($IncludePowerBI){ Install-App "Microsoft.PowerBI" "Power BI" }
+if ($IncludeDocker)   { Install-App "Docker.DockerDesktop" "Docker" }
+if ($IncludePowerBI)  { Install-App "Microsoft.PowerBI" "Power BI" }
 
 # Terraform ecosystem
-Install-App "HashiCorp.TerraformLS" "Terraform Language Server"
-Install-App "TerraformLinters.tflint" "TFLint"
+Install-App "HashiCorp.terraform-ls"          "Terraform Language Server"
+Install-App "TerraformLinters.tflint"         "TFLint"
 
 if ($IncludeSecurityTools){
-    Install-App "AquaSecurity.tfsec"  "tfsec"
-    Install-App "Accurics.Terrascan"  "Terrascan"
+    Install-App "AquaSecurity.tfsec"          "tfsec"
+    Install-App "Accurics.Terrascan"          "Terrascan"
 }
 
-# SSMS (always latest)
+# SQL Server Management Studio (OFFICIAL installer)
 Install-SSMS
 
-# Azure CLI self-upgrade
-try {
-    az upgrade --yes --only-show-errors 2>$null
-} catch {}
+# Azure CLI self-upgrade (silent)
+try { az upgrade --yes --only-show-errors 2>$null } catch {}
 
 # ---------------------------------------------------------------------
-# PATH refresh BEFORE using tools
+# PATH refresh
 # ---------------------------------------------------------------------
 Refresh-Path
 
 # ---------------------------------------------------------------------
 # Python tooling
 # ---------------------------------------------------------------------
-Retry { python --version }
 Retry { python -m ensurepip }
 Retry { python -m pip install --upgrade pip setuptools wheel }
 Retry {
@@ -119,7 +122,7 @@ Retry {
 }
 
 # ---------------------------------------------------------------------
-# VS Code extensions
+# VS Code extensions (USER context)
 # ---------------------------------------------------------------------
 $codeCmd = Get-Command code.cmd -ErrorAction SilentlyContinue
 if ($codeCmd){
@@ -130,7 +133,6 @@ if ($codeCmd){
         "ms-dotnettools.csdevkit",
         "esbenp.prettier-vscode",
         "dorzey.vscode-sqlfluff",
-        "ms-windows-ai-studio.windows-ai-studio",
 
         # Python / Jupyter
         "ms-python.python",
@@ -147,7 +149,6 @@ if ($codeCmd){
         "ms-azuretools.vscode-docker",
         "docker.docker",
         "HashiCorp.terraform",
-        "ms-azuretools.vscode-azureterraform",
 
         # DevOps / GitHub
         "github.vscode-pull-request-github",
@@ -195,5 +196,5 @@ Stop-Transcript
 Write-Host "=============================================================="
 Write-Host "Developer Workstation READY"
 Write-Host "Duration: $((Get-Date)-$start)"
-Write-Host "Restart PowerShell and VS Code once."
+Write-Host "One reboot recommended."
 Write-Host "=============================================================="
