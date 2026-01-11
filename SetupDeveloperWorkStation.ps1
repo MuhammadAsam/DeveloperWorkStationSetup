@@ -85,7 +85,7 @@ if ($IncludePowerBI){ Install-App "Microsoft.PowerBI" "Power BI" }
 
 # Terraform ecosystem
 Install-App "HashiCorp.TerraformLS" "Terraform Language Server"
-Install-App "tflint.tflint"         "TFLint"
+Install-App "TerraformLinters.tflint" "TFLint"
 
 if ($IncludeSecurityTools){
     Install-App "AquaSecurity.tfsec"  "tfsec"
@@ -96,7 +96,9 @@ if ($IncludeSecurityTools){
 Install-SSMS
 
 # Azure CLI self-upgrade
-try { az upgrade --yes --only-show-errors } catch {}
+try {
+    az upgrade --yes --only-show-errors 2>$null
+} catch {}
 
 # ---------------------------------------------------------------------
 # PATH refresh BEFORE using tools
@@ -128,6 +130,7 @@ if ($codeCmd){
         "ms-dotnettools.csdevkit",
         "esbenp.prettier-vscode",
         "dorzey.vscode-sqlfluff",
+        "ms-windows-ai-studio.windows-ai-studio",
 
         # Python / Jupyter
         "ms-python.python",
@@ -150,7 +153,7 @@ if ($codeCmd){
         "github.vscode-pull-request-github",
         "github.vscode-github-actions",
         "github.remotehub",
-        "ms-vscode.azure-devops",
+        "ms-azure-devops.azure-pipelines",
 
         # Fonts
         "seyyedkhandon.firacode"
