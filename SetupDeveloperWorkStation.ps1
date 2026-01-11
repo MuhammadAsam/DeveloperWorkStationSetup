@@ -1,6 +1,6 @@
 # =====================================================================
 # Setup-DeveloperWorkstation.ps1
-# Version: 2026.01.11.02
+# Version: 2026.01.11.03
 # Purpose: Install-only developer workstation setup
 # NOTE: This script is fully standalone and requires WinGet.
 # =====================================================================
@@ -72,12 +72,12 @@ $start = Get-Date
 
 Retry { winget source update }
 
-Install-App "Python.Python.3.12"         "Python"
-Install-App "Git.Git"                    "Git"
-Install-App "Microsoft.DotNet.SDK.8"     ".NET SDK"
-Install-App "Microsoft.VisualStudioCode" "VS Code"
-Install-App "Microsoft.AzureCLI"         "Azure CLI"
-Install-App "HashiCorp.Terraform"        "Terraform"
+Install-App "Python.Python.3.12"                 "Python"
+Install-App "Git.Git"                            "Git"
+Install-App "Microsoft.DotNet.SDK.8"             ".NET SDK"
+Install-App "Microsoft.VisualStudioCode.User"    "VS Code (User Installer)"
+Install-App "Microsoft.AzureCLI"                 "Azure CLI"
+Install-App "HashiCorp.Terraform"                "Terraform"
 
 # Optional tools
 if ($IncludeDocker){ Install-App "Docker.DockerDesktop" "Docker" }
